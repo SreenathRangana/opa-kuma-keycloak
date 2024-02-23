@@ -1,0 +1,109 @@
+
+# Enable sidecar-injection on default namespace
+
+# kubectl annotate namespace default kuma.io/sidecar-injection=enabled
+
+---
+apiVersion: kuma.io/v1alpha1
+kind: ProxyTemplate
+mesh: default
+metadata:
+  name: opa-ext-authz-filter
+spec:
+  selectors:
+    - match:
+        kuma.io/service: '*'
+  conf:
+    imports:
+      - default-proxy
+    modifications:
+      - httpFilter:
+          operation: addBefore
+          match:
+            name: envoy.filters.http.router
+            origin: inbound
+          value: |
+            name: envoy.filters.http.header_to_metadata
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.header_to_metadata.v3.Config
+              request_rules:
+              - header: x-opa-authz
+                on_header_missing:
+                  key: 'policy_type'
+                  value: 'ingress'
+      - httpFilter:
+          operation: addBefore
+          match:
+            name: envoy.filters.http.router
+            origin: inbound
+          value: |
+            name: envoy.filters.http.ext_authz
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+              metadata_context_namespaces:
+              - envoy.filters.http.header_to_metadata
+              transport_api_version: V3
+              with_request_body:
+                max_request_bytes: 8192
+                allow_partial_message: true
+              failure_mode_allow: false
+              grpc_service:
+                google_grpc:
+                  target_uri: 127.0.0.1:9191
+                  stat_prefix: ext_authz
+                timeout: 0.5s
+      - httpFilter:
+          operation: addBefore
+          match:
+            name: envoy.filters.http.router
+            origin: outbound
+          value: |
+            name: envoy.filters.http.header_to_metadata
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.header_to_metadata.v3.Config
+              request_rules:
+              - header: x-opa-authz
+                on_header_missing:
+                  key: 'policy_type'
+                  value: 'egress'
+      - httpFilter:
+          operation: addBefore
+          match:
+            name: envoy.filters.http.router
+            origin: outbound
+          value: |
+            name: envoy.filters.http.ext_authz
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+              metadata_context_namespaces:
+              - envoy.filters.http.header_to_metadata
+              transport_api_version: V3
+              with_request_body:
+                max_request_bytes: 8192
+                allow_partial_message: true
+              failure_mode_allow: false
+              grpc_service:
+                google_grpc:
+                  target_uri: 127.0.0.1:9191
+                  stat_prefix: ext_authz
+                timeout: 0.5s
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: opa-kuma-config
+  labels:
+    system-type: kuma
+data:
+  conf.yaml: |
+    discovery:
+      name: discovery
+      service: styra
+    labels:
+      system-id: d030c972ace24e13b89fb249ba2b6322
+      system-type: template.kuma:1.0
+    services:
+    - name: styra
+      url: http://slp-kuma-svc:8080/v1
+    - name: styra-bundles
+      url: http://slp-kuma-svc:8080/v1/bundles
