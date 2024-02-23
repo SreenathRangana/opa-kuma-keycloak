@@ -1,0 +1,163 @@
+# The sample app consists of two deployments: client-load and example-app
+
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: example-app
+  labels:
+    app: example-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: example-app
+  template:
+    metadata:
+      annotations:
+        kuma.io/virtual-probes: disabled
+      labels:
+        app: example-app
+    spec:
+      containers:
+        - name: app
+          image: openpolicyagent/demo-restful-api:0.2
+          ports:
+            - containerPort: 5000
+          env:
+          - name: POLICY_PATH
+            value: /v1/data/application/main
+        - name: opa
+          image: openpolicyagent/opa:0.61.0-envoy-rootless
+          volumeMounts:
+          - readOnly: true
+            mountPath: /config
+            name: opa-config-vol
+          env:
+          - name: OPA_LOG_TIMESTAMP_FORMAT
+            value: "2006-01-02T15:04:05.999999999Z07:00"
+          args:
+          - "run"
+          - "--server"
+          - "--addr=localhost:8181"
+          - "--diagnostic-addr=0.0.0.0:8282"
+          - "--ignore=.*"
+          - "--config-file=/config/conf.yaml"
+          livenessProbe:
+            httpGet:
+              path: /health?plugins
+              scheme: HTTP
+              port: 8282
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health?plugins
+              scheme: HTTP
+              port: 8282
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+      - name: opa-config-vol
+        configMap:
+          name: opa-kuma-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: example-app-service
+  annotations:
+    80.service.kuma.io/protocol: "http"
+spec:
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 5000
+  selector:
+    app: example-app
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: client-load
+  labels:
+    app: client-load
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: client-load
+  template:
+    metadata:
+      labels:
+        app: client-load
+      annotations:
+        kuma.io/virtual-probes: disabled
+    spec:
+      containers:
+      - command:
+        - /bin/sh
+        - -ec
+        - sleep 30; while true; do
+          curl -is --user alice:password ${EXAMPLE_APP_SVC}/finance/salary/alice;
+          curl -is --user bob:password ${EXAMPLE_APP_SVC}/finance/salary/alice;
+          curl -is --user bob:password ${EXAMPLE_APP_SVC}/finance/salary/charlie;
+          curl -is --user david:password ${EXAMPLE_APP_SVC}/finance/salary/bob;
+          curl -is --user david:password ${EXAMPLE_APP_SVC}/hr/dashboard;
+          curl -is --user eve:password ${EXAMPLE_APP_SVC}/admin;
+          sleep 30; done
+        image: "curlimages/curl:7.74.0"
+        imagePullPolicy: IfNotPresent
+        name: app
+        env:
+        - name: EXAMPLE_APP_SVC
+          value: example-app-service
+      - name: opa
+        image: openpolicyagent/opa:0.61.0-envoy-rootless
+        volumeMounts:
+        - readOnly: true
+          mountPath: /config
+          name: opa-config-vol
+        env:
+        - name: OPA_LOG_TIMESTAMP_FORMAT
+          value: "2006-01-02T15:04:05.999999999Z07:00"
+        args:
+        - "run"
+        - "--server"
+        - "--addr=localhost:8181"
+        - "--diagnostic-addr=0.0.0.0:8282"
+        - "--ignore=.*"
+        - "--config-file=/config/conf.yaml"
+        livenessProbe:
+          httpGet:
+            path: /health?plugins
+            scheme: HTTP
+            port: 8282
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /health?plugins
+            scheme: HTTP
+            port: 8282
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: opa-config-vol
+        configMap:
+          name: opa-kuma-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: client-load-service
+  annotations:
+    80.service.kuma.io/protocol: "http"
+spec:
+  ports:
+  - name: http
+    port: 80
+  selector:
+    app: client-load

@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: slp-kuma
+  labels:
+    app: slp
+    system-type: kuma
+type: Opaque
+stringData:
+  slp.yaml: |
+    discovery:
+      name: discovery
+      prefix: /systems/d030c972ace24e13b89fb249ba2b6322
+      service: styra
+    labels:
+      system-id: d030c972ace24e13b89fb249ba2b6322
+      system-type: template.kuma:1.0
+    services:
+    - credentials:
+        bearer:
+          token: _BMqhPJmmyI0BbQ-IvLN6PqUzPXPFktUaKdW9k9YbN2MTDnZWpo3ET7ManhkTwUSP3DDy3DC7Hl7a7iGYonMXJ2P6peNEJt1
+      name: styra
+      url: https://d8okdd.svc.styra.com/v1
+    - credentials:
+        bearer:
+          token: _BMqhPJmmyI0BbQ-IvLN6PqUzPXPFktUaKdW9k9YbN2MTDnZWpo3ET7ManhkTwUSP3DDy3DC7Hl7a7iGYonMXJ2P6peNEJt1
+      name: styra-bundles
+      url: https://d8okdd.svc.styra.com/v1/bundles
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: slp-kuma-svc
+  labels:
+    app: slp
+    system-type: kuma
+spec:
+  ports:
+  - name: http
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: slp
+    system-type: kuma
+---
+kind: StatefulSet
+apiVersion: apps/v1
+metadata:
+  name: slp-kuma-app
+  labels:
+    app: slp
+    sytem-type: kuma
+spec:
+  replicas: 1
+  serviceName: "slp-kuma-app"
+  selector:
+    matchLabels:
+      app: slp
+      system-type: kuma
+  template:
+    metadata:
+      annotations:
+        kuma.io/sidecar-injection: disabled
+      labels:
+        app: slp
+        system-type: kuma
+    spec:
+      containers:
+      - name: slp
+        image: "styra/styra-local-plane:0.8.1"
+        args:
+          - "--config-file=/config/slp.yaml"
+          - "--addr=0.0.0.0:8080"
+        env:
+          - name: SIGSTORE_NO_CACHE
+            value: "true"
+        livenessProbe:
+          httpGet:
+            path: /v1/system/alive
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /v1/system/ready
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        volumeMounts:
+        - name: slp-config-vol
+          readOnly: true
+          mountPath: /config/slp.yaml
+          subPath: slp.yaml
+        - name: slp-scratch-vol
+          mountPath: /scratch
+      volumes:
+      - name: slp-config-vol
+        secret:
+          secretName: slp-kuma
+  volumeClaimTemplates:
+  - metadata:
+      name: slp-scratch-vol
+      labels:
+        slp-pvc: slp-kuma-app-pvc
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 2Gi
